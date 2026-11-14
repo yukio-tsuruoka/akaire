@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="赤入れ">
+<meta name="theme-color" content="#ffffff">
+<title>試運転写真 赤入れツール</title>
+<style>
+  :root { --red:#e8231f; --bg:#f4f3f0; --ink:#222; --line:#d8d5cf; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:8px; padding:10px 12px; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  button, .filebtn { font:inherit; font-size:15px; padding:9px 14px; border-radius:10px; border:1px solid var(--line); background:#fff; color:var(--ink); cursor:pointer; }
+  button.primary, .filebtn.primary { background:var(--red); color:#fff; border-color:var(--red); font-weight:600; }
+  button:disabled { opacity:.4; }
+  .filebtn input { display:none; }
+  .spacer { flex:1; }
+  #status { font-size:13px; color:#666; }
+  #tools { display:flex; gap:8px; padding:8px 12px; flex-wrap:wrap; background:#fff; border-bottom:1px solid var(--line); }
+  #stage { padding:10px; display:flex; justify-content:center; }
+  #cv { max-width:100%; max-height:calc(100vh - 230px); touch-action:none; background:#ddd; border-radius:6px; box-shadow:0 1px 4px rgba(0,0,0,.15); }
+  #empty { text-align:center; color:#777; padding:60px 20px; line-height:1.8; }
+  #sel { display:none; gap:10px; align-items:center; padding:8px 12px; background:#fff7f6; border-top:1px solid #f1c9c6; position:sticky; bottom:0; flex-wrap:wrap; }
+  #sel input[type=text] { font:inherit; font-size:16px; padding:8px; border:1px solid var(--line); border-radius:8px; min-width:200px; flex:1; }
+  #sel textarea { font:inherit; font-size:16px; padding:8px; border:1px solid var(--line); border-radius:8px; min-width:200px; flex:1; height:62px; }
+  #sel label { font-size:13px; color:#555; display:flex; align-items:center; gap:6px; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:20; padding:16px; }
+  .card { background:#fff; border-radius:14px; padding:18px; width:min(560px,100%); max-height:92vh; overflow:auto; }
+  .card h2 { margin:0 0 12px; font-size:18px; }
+  .row { display:flex; gap:10px; align-items:center; margin:10px 0; }
+  .row label { width:120px; font-size:14px; color:#444; flex:none; }
+  .row input, .row select { font:inherit; font-size:16px; padding:8px; border:1px solid var(--line); border-radius:8px; flex:1; min-width:0; }
+  .row input[type=checkbox] { flex:none; width:22px; height:22px; }
+  .hint { font-size:13px; color:#666; line-height:1.6; }
+  #outImg { width:100%; border-radius:8px; margin:10px 0; -webkit-touch-callout:default; }
+  .btns { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>赤入れツール</h1>
+  <label class="filebtn primary">写真を選ぶ<input id="file" type="file" accept="image/*" multiple></label>
+  <span id="status"></span>
+  <span class="spacer"></span>
+  <button id="btnSettings">設定</button>
+  <button id="btnSave" class="primary" disabled>保存</button>
+</header>
+<div id="tools">
+  <button data-add="ellipse">＋ 赤丸</button>
+  <button data-add="rect">＋ 赤枠</button>
+  <button data-add="arrow">＋ 矢印</button>
+  <button data-add="text">＋ 文字</button>
+  <button id="btnPreset">定型文…</button>
+  <span class="spacer"></span>
+  <button id="btnReset">配置を初期化</button>
+</div>
+<div id="stage">
+  <div id="empty">「写真を選ぶ」から試運転の写真を開いてください。<br>複数枚まとめて選ぶと、保存するたびに次の写真へ進みます。<br>タイトル・日付・サイン・丸・枠は前回と同じ位置に自動で入ります。</div>
+  <canvas id="cv" style="display:none"></canvas>
+</div>
+<div id="sel">
+  <textarea id="selText" style="display:none"></textarea>
+  <label id="sizeLbl">大きさ <input id="selSize" type="range" min="1" max="100"></label>
+  <button id="btnDel">削除</button>
+  <button id="btnDone">選択解除</button>
+</div>
+
+<!-- 設定 -->
+<div class="modal" id="mSettings"><div class="card">
+  <h2>設定（毎回入る内容）</h2>
+  <div class="row"><label>タイトル1行目</label><input id="sTitle"></div>
+  <div class="row"><label>タイトル2行目</label><input id="sTitle2"></div>
+  <div class="row"><label>テスト番号</label><input id="sNum" type="number" min="1" style="max-width:90px"> / <input id="sTotal" type="number" min="1" style="max-width:90px"></div>
+  <div class="row"><label>保存後に番号+1</label><input id="sAuto" type="checkbox"></div>
+  <div class="row"><label>日付</label><input id="sDate"></div>
+  <div class="row"><label>日付の書式</label><select id="sDateFmt"><option value="-">2026-11-13</option><option value="/">2026/11/13</option><option value="実施">2026/11/13実施</option></select></div>
+  <div class="row"><label>サイン</label><input id="sSign"></div>
+  <div class="row"><label>定型文（改行区切り）</label><textarea id="sPresets" style="flex:1;font:inherit;font-size:15px;height:110px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea></div>
+  <div class="row"><label>線の太さ</label><input id="sLw" type="range" min="2" max="20"></div>
+  <p class="hint">日付は写真を開いた日が入ります。別の日の写真なら書き換えてください。<br>タイトル2行目の「#」の後ろに番号が付きます。</p>
+  <div class="btns"><button id="sClose" class="primary">閉じる</button></div>
+</div></div>
+
+<!-- 定型文 -->
+<div class="modal" id="mPreset"><div class="card">
+  <h2>定型文を追加</h2>
+  <div id="presetList" style="display:flex;flex-direction:column;gap:8px"></div>
+  <div class="btns"><button id="pClose">閉じる</button></div>
+</div></div>
+
+<!-- 保存 -->
+<div class="modal" id="mOut"><div class="card">
+  <h2>保存</h2>
+  <p class="hint"><b>下の画像を長押し →「写真に追加」</b>で写真アプリに保存できます。</p>
+  <img id="outImg" alt="編集済み画像">
+  <div class="btns"><button id="oNext" class="primary">次へ</button></div>
+</div></div>
+
+<script>
+(() => {
+const RED = '#e8231f';
+const FONT = '"Hiragino Sans","Hiragino Kaku Gothic ProN",-apple-system,sans-serif';
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+
+// ---------- 保存領域 ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('akaire_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('akaire_' + k, JSON.stringify(v)); } catch (e) {} }
+};
+const today = () => { const d = new Date(); return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')]; };
+const S = Object.assign({
+  title: 'MCあり腎尿', title2: 'ストレステスト#', num: 1, total: 20, auto: true,
+  dateFmt: '-', sign: 'OK! By Yukio.',
+  presets: '温度OK!\nグラフOK!\nOK!\n20号機\nグラフ 正常\n温度 ℃',
+  lw: 6
+}, store.get('settings', {}));
+let dateStr = '';
+function fmtDate() { const [y,m,d] = today(); return S.dateFmt === '-' ? `${y}-${m}-${d}` : S.dateFmt === '/' ? `${y}/${m}/${d}` : `${y}/${m}/${d}実施`; }
+function titleText() { return `${S.title}\n${S.title2}${String(S.num).padStart(2,'0')}/${S.total}`; }
+function saveSettings() { store.set('settings', S); }
+
+// ---------- 状態 ----------
+let img = null, W = 0, H = 0, els = [], sel = null, files = [], fileIdx = 0;
+
+// 既定の配置（画像サイズに対する割合）
+const DEFAULT_LAYOUT = [
+  { role:'title', type:'text', x:.03, y:.18, size:.042, color:'#e8402a' },
+  { role:'date',  type:'text', x:.44, y:.20, size:.05 },
+  { role:'sign',  type:'text', x:.55, y:.68, size:.05 },
+  { type:'ellipse', x:.22, y:.36, w:.08, h:.09 },
+  { type:'text', text:'温度OK!', x:.36, y:.30, size:.05 },
+  { type:'rect', x:.14, y:.52, w:.26, h:.11 },
+  { type:'text', text:'グラフOK!', x:.20, y:.66, size:.05 },
+];
+
+function lwPx() { return Math.max(2, W * S.lw / 1000); }
+
+function applyLayout(layout) {
+  els = layout.map(o => {
+    const e = { ...o };
+    if (e.x != null) e.x *= W; if (e.y != null) e.y *= H;
+    if (e.w != null) e.w *= W; if (e.h != null) e.h *= H;
+    if (e.x2 != null) { e.x1 *= W; e.y1 *= H; e.x2 *= W; e.y2 *= H; }
+    if (e.size != null) e.size *= W;
+    if (e.lw != null) e.lw *= W;
+    syncRole(e);
+    return e;
+  });
+}
+function syncRole(e) {
+  if (e.role === 'title') e.text = titleText();
+  if (e.role === 'date') e.text = dateStr;
+  if (e.role === 'sign') e.text = S.sign;
+}
+function currentLayout() {
+  return els.map(e => {
+    const o = { ...e };
+    if (o.x != null) o.x /= W; if (o.y != null) o.y /= H;
+    if (o.w != null) o.w /= W; if (o.h != null) o.h /= H;
+    if (o.x2 != null) { o.x1 /= W; o.y1 /= H; o.x2 /= W; o.y2 /= H; }
+    if (o.size != null) o.size /= W;
+    if (o.lw != null) o.lw /= W;
+    if (o.role) delete o.text;
+    return o;
+  });
+}
+
+// ---------- 描画 ----------
+function textBox(e) {
+  ctx.font = `600 ${e.size}px ${FONT}`;
+  const lines = String(e.text || '').split('\n');
+  const w = Math.max(...lines.map(l => ctx.measureText(l).width), e.size * .5);
+  return { x:e.x, y:e.y, w, h: lines.length * e.size * 1.2, lines };
+}
+function bbox(e) {
+  if (e.type === 'text') return textBox(e);
+  if (e.type === 'arrow') return { x:Math.min(e.x1,e.x2), y:Math.min(e.y1,e.y2), w:Math.abs(e.x2-e.x1), h:Math.abs(e.y2-e.y1) };
+  return { x:Math.min(e.x, e.x+e.w), y:Math.min(e.y, e.y+e.h), w:Math.abs(e.w), h:Math.abs(e.h) };
+}
+function drawEl(c, e) {
+  const lw = e.lw || lwPx();
+  c.strokeStyle = c.fillStyle = e.color || RED; c.lineWidth = lw; c.lineCap = c.lineJoin = 'round';
+  if (e.type === 'text') {
+    const b = textBox(e);
+    c.font = `600 ${e.size}px ${FONT}`; c.textBaseline = 'top';
+    b.lines.forEach((l, i) => c.fillText(l, e.x, e.y + i * e.size * 1.2));
+  } else if (e.type === 'ellipse') {
+    c.beginPath(); c.ellipse(e.x + e.w/2, e.y + e.h/2, Math.abs(e.w/2), Math.abs(e.h/2), 0, 0, Math.PI*2); c.stroke();
+  } else if (e.type === 'rect') {
+    c.strokeRect(e.x, e.y, e.w, e.h);
+  } else if (e.type === 'arrow') {
+    const a = Math.atan2(e.y2-e.y1, e.x2-e.x1), hl = lw * 5;
+    c.beginPath(); c.moveTo(e.x1, e.y1); c.lineTo(e.x2, e.y2);
+    c.moveTo(e.x2, e.y2); c.lineTo(e.x2 - hl*Math.cos(a-.45), e.y2 - hl*Math.sin(a-.45));
+    c.moveTo(e.x2, e.y2); c.lineTo(e.x2 - hl*Math.cos(a+.45), e.y2 - hl*Math.sin(a+.45));
+    c.stroke();
+  }
+}
+function handleR() { return Math.max(14, (W / cv.getBoundingClientRect().width) * 16); }
+function handles(e) {
+  if (e.type === 'arrow') return [{ k:'p1', x:e.x1, y:e.y1 }, { k:'p2', x:e.x2, y:e.y2 }];
+  if (e.type === 'text') return [];
+  return [{ k:'br', x:e.x + e.w, y:e.y + e.h }];
+}
+function render() {
+  if (!img) return;
+  ctx.clearRect(0,0,W,H); ctx.drawImage(img, 0, 0, W, H);
+  els.forEach(e => drawEl(ctx, e));
+  if (sel) {
+    const b = bbox(sel), p = handleR() * .6, s = W / cv.getBoundingClientRect().width;
+    ctx.save(); ctx.setLineDash([8*s, 6*s]); ctx.lineWidth = 2*s; ctx.strokeStyle = '#1a73e8';
+    ctx.strokeRect(b.x - p, b.y - p, b.w + p*2, b.h + p*2); ctx.restore();
+    handles(sel).forEach(h => { ctx.beginPath(); ctx.fillStyle = '#1a73e8'; ctx.arc(h.x, h.y, handleR(), 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3*s; ctx.stroke(); });
+  }
+}
+
+// ---------- 読み込み ----------
+$('file').addEventListener('change', ev => {
+  files = Array.from(ev.target.files || []); fileIdx = 0;
+  if (files.length) loadFile(files[0]);
+  ev.target.value = '';
+});
+function loadFile(f) {
+  const url = URL.createObjectURL(f);
+  const im = new Image();
+  im.onload = () => {
+    img = im; W = cv.width = im.naturalWidth; H = cv.height = im.naturalHeight;
+    dateStr = fmtDate();
+    applyLayout(store.get('layout', null) || DEFAULT_LAYOUT);
+    sel = null; showSel();
+    $('empty').style.display = 'none'; cv.style.display = 'block'; $('btnSave').disabled = false;
+    updateStatus(); render();
+  };
+  im.onerror = () => { $('status').textContent = 'この画像は開けませんでした'; };
+  im.src = url;
+}
+function updateStatus() {
+  $('status').textContent = `#${String(S.num).padStart(2,'0')}/${S.total}` + (files.length > 1 ? `　写真 ${fileIdx+1}/${files.length}` : '');
+}
+
+// ---------- 操作 ----------
+function toImg(ev) { const r = cv.getBoundingClientRect(); return { x:(ev.clientX - r.left) * W / r.width, y:(ev.clientY - r.top) * H / r.height }; }
+function hit(e, p) {
+  const b = bbox(e), t = handleR();
+  if (e.type === 'arrow') {
+    const dx = e.x2-e.x1, dy = e.y2-e.y1, L = dx*dx+dy*dy || 1;
+    const u = Math.max(0, Math.min(1, ((p.x-e.x1)*dx + (p.y-e.y1)*dy) / L));
+    return Math.hypot(p.x - (e.x1+u*dx), p.y - (e.y1+u*dy)) < t * 1.5;
+  }
+  return p.x > b.x - t && p.x < b.x + b.w + t && p.y > b.y - t && p.y < b.y + b.h + t;
+}
+let drag = null;
+cv.addEventListener('pointerdown', ev => {
+  if (!img) return; ev.preventDefault(); cv.setPointerCapture(ev.pointerId);
+  const p = toImg(ev);
+  if (sel) {
+    const h = handles(sel).find(h => Math.hypot(h.x - p.x, h.y - p.y) < handleR() * 1.8);
+    if (h) { drag = { mode:h.k, p, orig:{...sel} }; return; }
+  }
+  const e = [...els].reverse().find(e => hit(e, p));
+  sel = e || null; showSel();
+  if (e) drag = { mode:'move', p, orig:{...e} };
+  render();
+});
+cv.addEventListener('pointermove', ev => {
+  if (!drag || !sel) return; ev.preventDefault();
+  const p = toImg(ev), dx = p.x - drag.p.x, dy = p.y - drag.p.y, o = drag.orig;
+  if (drag.mode === 'move') {
+    if (sel.type === 'arrow') { sel.x1 = o.x1+dx; sel.y1 = o.y1+dy; sel.x2 = o.x2+dx; sel.y2 = o.y2+dy; }
+    else { sel.x = o.x + dx; sel.y = o.y + dy; }
+  } else if (drag.mode === 'br') { sel.w = Math.max(20, o.w + dx); sel.h = Math.max(20, o.h + dy); }
+  else if (drag.mode === 'p1') { sel.x1 = o.x1 + dx; sel.y1 = o.y1 + dy; }
+  else if (drag.mode === 'p2') { sel.x2 = o.x2 + dx; sel.y2 = o.y2 + dy; }
+  render();
+});
+const endDrag = () => { if (drag) { drag = null; store.set('layout', currentLayout()); } };
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+
+function showSel() {
+  $('sel').style.display = sel ? 'flex' : 'none';
+  if (!sel) return;
+  const isText = sel.type === 'text';
+  const ta = $('selText');
+  ta.style.display = isText ? 'block' : 'none';
+  ta.disabled = !!sel.role;
+  ta.value = isText ? sel.text : '';
+  ta.placeholder = sel.role ? '' : '文字を入力';
+  if (sel.role) ta.value = sel.text + '\n（設定で変更）';
+  $('sizeLbl').firstChild.textContent = isText ? '文字の大きさ ' : '線の太さ ';
+  $('selSize').value = isText ? Math.round(sel.size / W * 1000) : Math.round((sel.lw || lwPx()) / W * 1000);
+  $('selSize').min = isText ? 10 : 2; $('selSize').max = isText ? 150 : 25;
+}
+$('selText').addEventListener('input', () => { if (sel && !sel.role) { sel.text = $('selText').value; render(); store.set('layout', currentLayout()); } });
+$('selSize').addEventListener('input', () => {
+  if (!sel) return; const v = +$('selSize').value * W / 1000;
+  if (sel.type === 'text') sel.size = v; else sel.lw = v;
+  render(); store.set('layout', currentLayout());
+});
+$('btnDel').onclick = () => { if (!sel) return; els = els.filter(e => e !== sel); sel = null; showSel(); render(); store.set('layout', currentLayout()); };
+$('btnDone').onclick = () => { sel = null; showSel(); render(); };
+
+function addEl(type, text) {
+  if (!img) return;
+  let e;
+  if (type === 'ellipse') e = { type, x:W*.4, y:H*.4, w:W*.1, h:H*.1 };
+  else if (type === 'rect') e = { type, x:W*.35, y:H*.4, w:W*.25, h:H*.12 };
+  else if (type === 'arrow') e = { type, x1:W*.6, y1:H*.35, x2:W*.45, y2:H*.45 };
+  else e = { type:'text', text: text || 'テキスト', x:W*.4, y:H*.45, size:W*.05 };
+  els.push(e); sel = e; showSel(); render(); store.set('layout', currentLayout());
+}
+document.querySelectorAll('[data-add]').forEach(b => b.onclick = () => addEl(b.dataset.add));
+$('btnReset').onclick = () => { if (!img) return; applyLayout(DEFAULT_LAYOUT); sel = null; showSel(); render(); store.set('layout', currentLayout()); };
+
+// 定型文
+$('btnPreset').onclick = () => {
+  const list = $('presetList'); list.innerHTML = '';
+  S.presets.split('\n').map(s => s.trim()).filter(Boolean).forEach(t => {
+    const b = document.createElement('button'); b.textContent = t; b.style.textAlign = 'left';
+    b.onclick = () => { $('mPreset').style.display = 'none'; addEl('text', t); };
+    list.appendChild(b);
+  });
+  $('mPreset').style.display = 'flex';
+};
+$('pClose').onclick = () => $('mPreset').style.display = 'none';
+
+// 設定
+$('btnSettings').onclick = () => {
+  $('sTitle').value = S.title; $('sTitle2').value = S.title2; $('sNum').value = S.num; $('sTotal').value = S.total;
+  $('sAuto').checked = S.auto; $('sDate').value = dateStr || fmtDate(); $('sDateFmt').value = S.dateFmt;
+  $('sSign').value = S.sign; $('sPresets').value = S.presets; $('sLw').value = S.lw;
+  $('mSettings').style.display = 'flex';
+};
+function readSettings() {
+  S.title = $('sTitle').value; S.title2 = $('sTitle2').value;
+  S.num = Math.max(1, parseInt($('sNum').value) || 1); S.total = Math.max(1, parseInt($('sTotal').value) || 20);
+  S.auto = $('sAuto').checked; S.sign = $('sSign').value; S.presets = $('sPresets').value; S.lw = +$('sLw').value;
+  dateStr = $('sDate').value;
+  saveSettings(); els.forEach(syncRole); updateStatus(); render(); if (sel) showSel();
+}
+['sTitle','sTitle2','sNum','sTotal','sAuto','sDate','sSign','sPresets','sLw'].forEach(id => $(id).addEventListener('input', readSettings));
+$('sAuto').addEventListener('change', readSettings);
+$('sDateFmt').addEventListener('change', () => { S.dateFmt = $('sDateFmt').value; $('sDate').value = fmtDate(); readSettings(); });
+$('sClose').onclick = () => { readSettings(); $('mSettings').style.display = 'none'; };
+
+// 保存
+let outUrl = null;
+$('btnSave').onclick = () => {
+  if (!img) return;
+  sel = null; showSel(); render();
+  const oc = document.createElement('canvas'); oc.width = W; oc.height = H;
+  const c = oc.getContext('2d'); c.drawImage(img, 0, 0, W, H); els.forEach(e => drawEl(c, e));
+  oc.toBlob(blob => {
+    if (outUrl) URL.revokeObjectURL(outUrl);
+    outUrl = URL.createObjectURL(blob);
+    $('outImg').src = outUrl;
+    store.set('layout', currentLayout());
+    $('oNext').textContent = fileIdx + 1 < files.length ? '次の写真へ' : '閉じる';
+    $('mOut').style.display = 'flex';
+  }, 'image/jpeg', 0.92);
+};
+$('oNext').onclick = () => {
+  $('mOut').style.display = 'none';
+  if (S.auto) { S.num = S.num >= S.total ? S.num : S.num + 1; saveSettings(); }
+  if (fileIdx + 1 < files.length) { fileIdx++; loadFile(files[fileIdx]); }
+  else { els.forEach(syncRole); updateStatus(); render(); }
+};
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', ev => { if (ev.target === m && m.id !== 'mOut') m.style.display = 'none'; }));
+window.addEventListener('resize', render);
+updateStatus();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {})); }
+</script>
+</body>
+</html>
